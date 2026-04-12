@@ -94,7 +94,8 @@ content. The browser handles Google's multi-hop redirect and session flow native
 Do NOT conclude this is an auth problem unless the HTTP response explicitly contains
 "401 Unauthorized" or "403 Forbidden". Report the exact error received from both attempts
 in the simulation report and halt with a clear message asking the user to verify the sheet
-is shared as "Anyone with the link — Viewer".
+is shared as "Anyone with the link — Viewer". Do NOT proceed with the simulation based on
+stale data.
 
 **Do NOT:**
 - Skip Attempt 1 and go straight to `web_browser` — always try `http_request` first
@@ -224,6 +225,9 @@ sheet and clearly label it as stale.
 2. News-researched candidates identified in Step 3a
 
 Do NOT speculatively fetch prices for assets not in the portfolio and not news-identified.
+
+Do NOT use a stale or market close price as a basis for a trade. If a live price is not available
+for a security, do not attempt to trade that security.
 
 Add a 1-second delay between `web_search` calls for equity prices to avoid rate limiting.
 No delay is needed between Coinbase API calls.
@@ -375,15 +379,11 @@ For each trade record:
 
 ## Step 4 — Update the Spreadsheet
 
-### Approach A — Via Google Sheets API (if OAuth available)
-
-Use `http_request` to PATCH/PUT updated values via Sheets API.
-
-### Approach B — Via CSV Email + Apps Script (primary fallback)
+### Approach A — Via CSV Email + Apps Script (primary fallback)
 
 Generate CSVs and email them. The user's Apps Script auto-imports within 5 minutes.
 
-### Approach C — Provide Artifact Downloads
+### Approach B — Provide Artifact Downloads
 
 Always produce downloadable CSVs as a backup regardless of write-back method.
 
