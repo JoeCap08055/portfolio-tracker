@@ -65,25 +65,41 @@ Use `http_request` with method GET and the URL above.
 
 ## Step 0 — Extract Inputs & Check Market Hours
 
-### 0a — Parse the Sheet Reference
+### 0a — Parse the Sheet Reference & Fetch the Ledger
 
 Resolve the **Spreadsheet ID** from the required input:
 
 - URL pattern: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit...`
 - Raw ID input: `{SPREADSHEET_ID}`
 
-**IMPORTANT — Always use `web_browser` to fetch the sheet CSV.** Do NOT use `http_request`
-for this step. The Google Sheets CSV export endpoint returns a short-lived signed redirect
-that expires before `http_request` can follow it. The `web_browser` tool handles the redirect
-and session flow natively and reliably.
-
-Fetch as CSV using `web_browser` to navigate to:
+The CSV export URL is:
 
 ```
 https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid=0
 ```
 
-Then use `extractText` to capture the CSV content from the page.
+**Fetch strategy — attempt in this exact order, move to the next only on failure:**
+
+**Attempt 1 — `http_request` with retries:**
+Use `http_request` with `maxRetries: 5` and `timeoutMs: 15000` against the CSV export URL.
+This works when Google's redirect chain resolves cleanly. If it returns HTTP 200 with CSV
+content, use it and skip Attempt 2.
+
+**Attempt 2 — `web_browser` fallback:**
+If Attempt 1 fails (network error, redirect loop, empty body, non-200 after retries), use
+`web_browser` to navigate to the CSV export URL, then use `extractText` to capture the
+content. The browser handles Google's multi-hop redirect and session flow natively.
+
+**On both attempts failing:**
+Do NOT conclude this is an auth problem unless the HTTP response explicitly contains
+"401 Unauthorized" or "403 Forbidden". Report the exact error received from both attempts
+in the simulation report and halt with a clear message asking the user to verify the sheet
+is shared as "Anyone with the link — Viewer".
+
+**Do NOT:**
+- Skip Attempt 1 and go straight to `web_browser` — always try `http_request` first
+- Conclude "auth problem" or "Sheets API required" based on redirect or timeout errors alone
+- Give up after a single failure — both attempts must be exhausted before halting
 
 ### 0b — Determine Market Status (CRITICAL — Check This First)
 

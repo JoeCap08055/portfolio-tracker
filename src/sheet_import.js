@@ -224,6 +224,9 @@ function importTransactions(ss, csvText) {
     if (existingRows > 1) {
         var tsCol = sheet.getRange(2, 1, existingRows - 1, 1).getValues();
         for (var i = 0; i < tsCol.length; i++) {
+            if (tsCol[i][0] === 'Session Total') {
+                continue;
+            }
             existingTimestamps[tsCol[i][0].toString().trim()] = true;
         }
     }
@@ -256,17 +259,6 @@ function applyTransactionFormulas(sheet, appendedCount) {
     var lastRow = sheet.getLastRow();
     var firstNewRow = lastRow - appendedCount + 1;
 
-    sheet.getRange(lastRow, 1, 1, sheet.getLastColumn()).setBorder(
-        false,   // top
-        false,  // left
-        true,  // bottom
-        false,  // right
-        false,  // vertical
-        false,  // horizontal
-        "black",
-        SpreadsheetApp.BorderStyle.SOLID_THICK
-    );
-
     for (var row = firstNewRow; row <= lastRow; row++) {
         // Total = Quantity * Price
         var qc = columnLetter(T_QUANTITY);
@@ -283,6 +275,14 @@ function applyTransactionFormulas(sheet, appendedCount) {
             .setFormula(`=(abs(${tc}${row})*IF(${bsc}${row}="BUY",-1,1))-${fc}${row}`);
     }
 
+    // Add session total row
+    sheet.appendRow(['Session Total']);
+    var nac = columnLetter(T_NET_AMOUNT);
+    sheet.getRange(sheet.getLastRow(), T_NET_AMOUNT)
+        .setFormula(`=SUM(${nac}${firstNewRow}:${nac}${firstNewRow+appendedCount-1})`);
+    appendedCount += 1;
+    lastRow += 1;
+
     // Format numeric columns
     sheet.getRange(firstNewRow, T_PRICE,      appendedCount, 1).setNumberFormat("$#,##0.00");
     sheet.getRange(firstNewRow, T_TOTAL,      appendedCount, 1).setNumberFormat("$#,##0.00");
@@ -296,6 +296,17 @@ function applyTransactionFormulas(sheet, appendedCount) {
             sheet.getRange(row, 1, 1, sheet.getLastColumn()).setBackground("#dddddd");
         }
     }
+
+    sheet.getRange(lastRow, 1, 1, sheet.getLastColumn()).setBorder(
+        false,   // top
+        false,  // left
+        true,  // bottom
+        false,  // right
+        false,  // vertical
+        false,  // horizontal
+        "black",
+        SpreadsheetApp.BorderStyle.SOLID_THICK
+    );
 }
 
 // ============================================================
