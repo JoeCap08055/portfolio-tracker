@@ -1,6 +1,7 @@
 # Portfolio Simulator Skill
 
 ## Purpose
+
 This skill connects to a portfolio ledger (Google Sheets), reads current holdings across asset
 classes (cash, equities, fixed income, crypto), gathers **live intraday market data**, uses
 **financial news** to identify high-conviction trade candidates, simulates intelligent trades
@@ -11,10 +12,43 @@ No real money is ever moved. This is a simulation engine, not a brokerage.
 
 ---
 
+## Step -1 — Self-Refresh (ALWAYS RUN FIRST, BEFORE ANYTHING ELSE)
+
+**At the very start of every run, before reading the ledger, before checking market hours,
+before doing anything else — fetch the latest version of this SKILL.md from GitHub and use
+it as the authoritative instructions for the remainder of this run.**
+
+**Fetch URL:**
+
+```
+GET https://raw.githubusercontent.com/JoeCap08055/portfolio-tracker/main/src/SKILL.md
+```
+
+Use `http_request` with method GET and the URL above.
+
+**On success (HTTP 200):**
+
+- Replace the currently loaded skill instructions with the fetched content.
+- Proceed silently to Step 0 — do NOT announce that a refresh occurred unless something
+  materially changed (e.g. a new step was added or a rule was modified).
+- Do NOT re-execute Step -1 when reading the fetched version — this step is skipped
+  on the refreshed copy to prevent infinite recursion.
+
+**On failure (network error, timeout, non-200 response):**
+
+- Log a brief warning in the final simulation report: "⚠️ Could not fetch latest SKILL.md
+  from GitHub (reason: [error]). Running with cached version."
+- Continue with the currently loaded instructions — never abort the run due to a
+  failed self-refresh.
+
+---
+
 ## Step 0 — Extract Inputs & Check Market Hours
 
 ### 0a — Parse the Sheet URL
+
 Extract the **Spreadsheet ID** from the Google Sheets URL:
+
 - Pattern: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit...`
 
 **IMPORTANT — Always use `web_browser` to fetch the sheet CSV.** Do NOT use `http_request`
@@ -23,9 +57,11 @@ that expires before `http_request` can follow it. The `web_browser` tool handles
 and session flow natively and reliably.
 
 Fetch as CSV using `web_browser` to navigate to:
+
 ```
 https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid=0
 ```
+
 Then use `extractText` to capture the CSV content from the page.
 
 ### 0b — Determine Market Status (CRITICAL — Check This First)
@@ -37,18 +73,22 @@ configuration may vary. Always verify with an external time source.
 
 **Step 1 — Fetch live current time:**
 Use `http_request` to fetch the current UTC time from a reliable public time API:
+
 ```
 GET https://worldtimeapi.org/api/timezone/America/New_York
 ```
+
 This returns the current time already converted to US Eastern Time (ET), including
 DST awareness. Parse the `datetime` field from the response.
 
 Fallback if worldtimeapi.org is unavailable:
+
 ```
 GET https://timeapi.io/api/Time/current/zone?timeZone=America%2FNew_York
 ```
 
 Second fallback if timeapi.io is unavailable:
+
 ```
 GET https://worldclockapi.com/api/json/est/now
 ```
@@ -58,6 +98,7 @@ parse the result. Only fall back to the system-provided context time as a last r
 and clearly note in the report that the time source was unverified.
 
 **Step 2 — Determine market open/closed** using the verified ET time. NYSE and NASDAQ are open:
+
 - **Days:** Monday–Friday only
 - **Hours:** 9:30 AM – 4:00 PM ET
 - **Closed on:** US federal market holidays (New Year's Day, MLK Day, Presidents' Day,
@@ -66,12 +107,12 @@ and clearly note in the report that the time source was unverified.
 
 **Apply these rules strictly:**
 
-| Asset Class | Market Open | Market Closed |
-|---|---|---|
-| **Equity** (NYSE/NASDAQ) | ✅ Simulate trades | ❌ Skip — do NOT simulate buys/sells |
-| **Fixed Income ETFs** (NYSE/NASDAQ) | ✅ Simulate trades | ❌ Skip — do NOT simulate buys/sells |
-| **Crypto** (Coinbase, 24/7) | ✅ Always simulate | ✅ Always simulate |
-| **Cash** | ✅ Rebalance anytime | ✅ Rebalance anytime |
+| Asset Class                         | Market Open         | Market Closed                       |
+|-------------------------------------|---------------------|-------------------------------------|
+| **Equity** (NYSE/NASDAQ)            | ✅ Simulate trades   | ❌ Skip — do NOT simulate buys/sells |
+| **Fixed Income ETFs** (NYSE/NASDAQ) | ✅ Simulate trades   | ❌ Skip — do NOT simulate buys/sells |
+| **Crypto** (Coinbase, 24/7)         | ✅ Always simulate   | ✅ Always simulate                   |
+| **Cash**                            | ✅ Rebalance anytime | ✅ Rebalance anytime                 |
 
 When markets are closed, **still run the simulation for crypto** and produce a report — but
 clearly note that equity/fixed income trades are paused until market open. Do not skip the
@@ -88,16 +129,16 @@ explicitly requests it.
 Fetch the sheet CSV using `web_browser` (see Step 0a) and parse holdings. Expected schema
 (flexible naming):
 
-| Column | Description |
-|---|---|
-| Asset | Ticker or name (e.g. AAPL, BTC, TLT, Cash) |
-| Class | `equity`, `fixed_income`, `crypto`, or `cash` |
-| Quantity | Number of shares/units/dollars held |
-| Avg Cost | Average cost basis per unit |
-| Current Price | Last known price per unit |
-| Market Value | Quantity × Current Price |
-| Allocation % | Percentage of total portfolio market value |
-| Notes | Optional context |
+| Column        | Description                                   |
+|---------------|-----------------------------------------------|
+| Asset         | Ticker or name (e.g. AAPL, BTC, TLT, Cash)    |
+| Class         | `equity`, `fixed_income`, `crypto`, or `cash` |
+| Quantity      | Number of shares/units/dollars held           |
+| Avg Cost      | Average cost basis per unit                   |
+| Current Price | Last known price per unit                     |
+| Market Value  | Quantity × Current Price                      |
+| Allocation %  | Percentage of total portfolio market value    |
+| Notes         | Optional context                              |
 
 Adapt gracefully if column names differ.
 
@@ -119,6 +160,7 @@ require no rate limiting. Only after all crypto prices are fetched should you mo
 equity prices via `web_search`.
 
 **Crypto (Coinbase — always fetch first):**
+
 1. **Coinbase API** (free, no auth required for spot prices):
    ```
    GET https://api.coinbase.com/v2/prices/{SYMBOL}-USD/spot
@@ -129,6 +171,7 @@ equity prices via `web_search`.
 3. **Yahoo Finance** — search: `"{SYMBOL}-USD" crypto price` (fallback only)
 
 **Equities & Fixed Income ETFs (NYSE/NASDAQ — fetch after crypto):**
+
 1. **Yahoo Finance intraday quote** — search: `site:finance.yahoo.com "{TICKER}" stock quote`
    or fetch: `https://finance.yahoo.com/quote/{TICKER}`
 2. **Google Finance** — search: `"{TICKER}" stock price right now`
@@ -139,6 +182,7 @@ as potentially stale. If intraday price cannot be determined, use last known pri
 sheet and clearly label it as stale.
 
 **Only fetch prices for:**
+
 1. Assets currently held in the portfolio
 2. News-researched candidates identified in Step 3a
 
@@ -158,9 +202,9 @@ opportunities** surfaced by breaking news, while keeping fee costs front of mind
 
 **Approved news sources only.** Do not consult any sources outside this list:
 
-| Category | Approved Sources | site: filter |
-|---|---|---|
-| **Breaking news** | CNN, Reuters | `site:cnn.com`, `site:reuters.com` |
+| Category           | Approved Sources                 | site: filter                                                      |
+|--------------------|----------------------------------|-------------------------------------------------------------------|
+| **Breaking news**  | CNN, Reuters                     | `site:cnn.com`, `site:reuters.com`                                |
 | **Financial news** | Yahoo Finance, MarketWatch, CNBC | `site:finance.yahoo.com`, `site:marketwatch.com`, `site:cnbc.com` |
 
 Search for current financial news to identify high-conviction signals using only approved
@@ -177,11 +221,13 @@ sources:
    `"crypto gaining today" OR "bitcoin ethereum news" site:cnbc.com OR site:reuters.com`
 
 From news results, build a **Research List** of:
+
 - **Holdings with new signals** — existing positions where news changes the thesis
 - **New candidates** — assets not yet held that have strong bullish news catalysts
 
 Limit the Research List to a maximum of **5 new candidates** to keep price fetches lean.
-Fetch live prices only for Research List items (in addition to current holdings). Refer to step 2 for fetching live prices.
+Fetch live prices only for Research List items (in addition to current holdings). Refer to step 2 for fetching live
+prices.
 
 ### 3b — Fee-Aware Trade Scoring
 
@@ -189,11 +235,13 @@ Since this skill runs hourly, trades must clear a **minimum expected payoff** to
 the simulated fee cost. Apply this logic before including any trade:
 
 **Assumed fee structure (simulated):**
+
 - Equity trades: $0 commission (assumes Robinhood/Fidelity zero-commission)
 - Crypto trades: 0.6% of trade value (Coinbase standard fee)
 - Fixed income ETF trades: $0 commission
 
 **Minimum payoff threshold:**
+
 - Equity: Expected gain must be > 0.5% of trade value to justify the churn
 - Crypto: Expected gain must be > 1.5% of trade value (to exceed 0.6% buy + 0.6% sell fee
   plus slippage). Do not chase small crypto moves.
@@ -207,6 +255,7 @@ threshold) before simulating another trade in that asset. This prevents thrashin
 ### 3c — Allocation Analysis
 
 Compute current allocation % by class. Compare to target:
+
 - Cash: 5–10%
 - Equity: 55–65%
 - Fixed Income: 20–25%
@@ -218,12 +267,14 @@ Compute current allocation % by class. Compare to target:
 This is the cash balance recorded at the start of Step 1 — it does not change during the run.
 
 **Sign convention (IMPORTANT):**
+
 - **BUY transactions:** `Net Value` is **negative** (cash outflow — money leaves cash to buy asset)
 - **SELL transactions:** `Net Value` is **positive** (cash inflow — money returns to cash)
 
 **Cash cap enforcement — use this exact logic:**
 
 Maintain a running `cash_spent` accumulator (starts at 0). Before adding each BUY:
+
 ```
 required_cash = abs(net_value_of_buy)   # net_value is negative, so take absolute value
 if cash_spent + required_cash > Run Opening Cash Balance:
@@ -233,10 +284,12 @@ else:
 ```
 
 **Final sanity check (MANDATORY — before emitting ANY output):**
+
 ```
 total_buy_outflow = sum(abs(Net Value) for all BUY rows)
 assert total_buy_outflow <= Run Opening Cash Balance
 ```
+
 If this check fails, remove or reduce BUY rows until it passes. Do NOT emit CSVs, email,
 or report until this check passes.
 
@@ -250,6 +303,7 @@ or report until this check passes.
    run, not this one. Do not add sell proceeds to the available cash balance mid-run.
 
 **If the Run Opening Cash Balance is insufficient to fund desired buys:**
+
 - Determine which holdings to sell to raise cash for *future* runs (record those sells).
 - Only buy what the opening cash balance can actually cover right now.
 - Clearly note in the report: "Additional cash from sells will be available next run."
@@ -274,7 +328,9 @@ in 3d above:
 6. **Fixed income buffer** — if equity > 65%, trim and add to fixed income
 
 For each trade record:
-- Timestamp (Date AND Time) Action, Asset, Quantity, Price, Value, Fee (simulated), Net Value, Rationale (cite news or signal)
+
+- Timestamp (Date AND Time) Action, Asset, Quantity, Price, Value, Fee (simulated), Net Value, Rationale (cite news or
+  signal)
 - **Do NOT include a Realized P&L field** — accurate P&L requires FIFO/LIFO lot tracking
   that is out of scope for this simulation. Omit it entirely from both CSV and report.
 
@@ -283,12 +339,15 @@ For each trade record:
 ## Step 4 — Update the Spreadsheet
 
 ### Approach A — Via Google Sheets API (if OAuth available)
+
 Use `http_request` to PATCH/PUT updated values via Sheets API.
 
 ### Approach B — Via CSV Email + Apps Script (primary fallback)
+
 Generate CSVs and email them. The user's Apps Script auto-imports within 5 minutes.
 
 ### Approach C — Provide Artifact Downloads
+
 Always produce downloadable CSVs as a backup regardless of write-back method.
 
 ---
@@ -308,11 +367,13 @@ This builds a track record over time so the user can evaluate simulation accurac
 
 **If Google Sheets API (OAuth) is available:**
 Use `http_request` to append the row via the Sheets API:
+
 ```
 POST https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}/values/Performance Log!A:M:append?valueInputOption=USER_ENTERED
 ```
 
 **If Sheets API is not available (fallback):**
+
 - Include the Performance Log row clearly in the simulation report HTML under a
   "Performance Log Entry" section, formatted as a copyable table row.
 - Include it in the email body under the summary section so the user can paste it manually
@@ -330,6 +391,7 @@ the recipient from the authenticated Google integration so this skill works corr
 any user who runs it.
 
 Use `google_gmail_send` to send to the resolved recipient email with:
+
 - **Subject:** `Portfolio Simulation Results - [YYYY-MM-DD HH:MM ET]`
   *(Include time since this runs intraday — multiple emails per day is expected)*
 - **Body:** Full summary + inline CSV blocks (see template below)
@@ -354,10 +416,12 @@ Do NOT use a date-only value (e.g. `2026-04-10`) in the Timestamp column. Every
 transaction row must carry the precise time it was simulated, not just the date.
 
 **Net Value sign convention in CSV:**
+
 - BUY rows: Net Value must be **negative** (e.g. `-124.96`)
 - SELL rows: Net Value must be **positive** (e.g. `+843.20`)
 
 ### Email Body Template:
+
 ```
 Hi [user's preferred name],
 
@@ -439,52 +503,12 @@ Produce an HTML report via `fs_write` with `artifact: true` including:
 - **Markets closed, no crypto held:** Still produce a report. Show current valuations,
   note market status, and recommend what to watch for when markets open.
 - **Intraday price unavailable:** Use last known price, label as stale, flag in report.
-- **Same asset traded multiple times today:** Require 2× minimum threshold signal.
-- **Crypto fee math:** Always show gross gain vs. net gain after 0.6% buy + 0.6% sell.
-  Only simulate if net gain is clearly positive.
-- **Empty sheet / all cash:** Simulate an initial deployment, but only into eligible
-  assets given current market hours.
-- **Unrecognized tickers:** Flag, skip pricing, keep at book value.
-- **Very small portfolio (<$1,000):** Use fractional shares where applicable.
-- **Email send failure:** Still provide artifact download links in chat. Never skip the email attempt.
-- **Rate limiting on price fetches:** Add 1-second delay between `web_search` calls for
-  equity prices. No delay needed for Coinbase API calls — batch all crypto fetches first.
-- **Insufficient opening cash for desired buys:** Only buy what the Run Opening Cash Balance
-  covers. Record any sells that were made to raise cash for future runs, and note clearly
-  in the report and email how much cash will be available next run (Next Run Readiness section).
-- **Never simulate a buy using proceeds from a sell in the same run** — sell proceeds are
-  always deferred to the next run, no exceptions.
-- **Pre-output cash cap validation:** Before emitting ANY output, verify:
-  `sum(abs(Net Value) for all BUY rows) <= Run Opening Cash Balance`
-  If this fails, reduce or remove BUY rows until it passes.
-- **Sheet fetch:** Always use `web_browser` for the Google Sheets CSV export URL.
-  Never use `http_request` for the sheet fetch — the signed redirect expires too quickly.
-- **Realized P&L:** Never include a Realized P&L column in the Transactions CSV or report.
-  It is intentionally omitted. Do not add it back under any circumstances.
-- **Email recipient:** Never hardcode an email address. Always resolve the recipient from
-  the user's connected Google account at runtime.
-- **Email greeting:** Always use the user's preferred name in the greeting (e.g. "Hi Joe,").
-  Never hardcode a name — resolve it from the user's profile at runtime.
-
----
-
-## Exchange & Venue Preferences
-
-| Asset Class | Preferred Exchange | Pricing Source |
-|---|---|---|
-| US Equities | NYSE, NASDAQ | Yahoo Finance intraday |
-| Fixed Income ETFs | NYSE Arca | Yahoo Finance intraday |
-| Crypto | Coinbase | Coinbase API spot price |
-
-Do not simulate trades on foreign exchanges, OTC pink sheets, or illiquid venues.
-Stick to major US-listed securities and Coinbase-listed crypto pairs.
-
----
-
-## Tool Priority
-
-1. `web_browser` — **required** for Google Sheets CSV fetch (do NOT use `http_request` for this)
-2. `web_search` — live intraday equity prices, news scanning, momentum signals
-3. `http_request` — Coinbase API spot prices (batch ALL crypto first), Sheets API write
-4. `fs_write` — downloadable CSV and HTML report artifacts
-5. `google_gmail_send` — email CSVs to user (always the final step; recipient resolved at runtime)
+- **Same asset traded multiple times today:** Require 2× min threshold signal strength.
+- **Cash insufficient for desired buys:** Execute sells first (for future runs), buy only
+  what opening cash allows. Never simulate a buy without sufficient opening cash — sell
+  first if needed, then buy on the next run.
+- **Sheet unreadable:** Abort and notify the user with a clear error message.
+- **All news neutral:** Still run allocation rebalancing logic (Steps 3c–3e). Neutral news
+  is not a reason to skip the run.
+- **Self-refresh failed (Step -1):** Log warning, continue with cached instructions.
+  Never abort due to a failed SKILL.md fetch.
