@@ -1,5 +1,25 @@
 # Portfolio Simulator Skill
 
+## Run/Input Contract
+
+This skill accepts exactly one required input:
+
+- A Google Sheets reference, provided as either:
+  - Full URL: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit...`
+  - Raw ID: `{SPREADSHEET_ID}`
+
+Invocation requirement:
+
+- Run this skill with one argument only: the sheet URL or spreadsheet ID.
+
+Normalization and validation:
+
+- If input is a URL, extract `{SPREADSHEET_ID}` from `/spreadsheets/d/{SPREADSHEET_ID}/`.
+- If input is already a raw ID, use it as-is.
+- If neither form yields a non-empty spreadsheet ID, fail fast with a clear error that includes the expected formats.
+
+---
+
 ## Purpose
 
 This skill connects to a portfolio ledger (Google Sheets), reads current holdings across asset
@@ -45,11 +65,12 @@ Use `http_request` with method GET and the URL above.
 
 ## Step 0 — Extract Inputs & Check Market Hours
 
-### 0a — Parse the Sheet URL
+### 0a — Parse the Sheet Reference
 
-Extract the **Spreadsheet ID** from the Google Sheets URL:
+Resolve the **Spreadsheet ID** from the required input:
 
-- Pattern: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit...`
+- URL pattern: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit...`
+- Raw ID input: `{SPREADSHEET_ID}`
 
 **IMPORTANT — Always use `web_browser` to fetch the sheet CSV.** Do NOT use `http_request`
 for this step. The Google Sheets CSV export endpoint returns a short-lived signed redirect
