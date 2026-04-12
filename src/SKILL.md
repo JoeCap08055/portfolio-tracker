@@ -420,7 +420,12 @@ transaction row must carry the precise time it was simulated, not just the date.
 - BUY rows: Net Value must be **negative** (e.g. `-124.96`)
 - SELL rows: Net Value must be **positive** (e.g. `+843.20`)
 
-### Email Body Template:
+### Email Body Template
+
+⚠️ **CRITICAL — CSV BLOCK MARKERS MUST BE FOLLOWED EXACTLY, CHARACTER FOR CHARACTER.**
+The markers below are parsed by an automated Apps Script. Any deviation — including
+decorative Unicode characters (━, ═, etc.), extra spaces, different capitalization, or
+changed punctuation — will break the import script. Copy them verbatim. No exceptions.
 
 ```
 Hi [user's preferred name],
@@ -453,62 +458,60 @@ Cash from Sells: $X,XXX.XX  ← deferred; available next run
   Sold [ASSET] for $X,XXX.XX → cash now available next run
   Intended buy: [ASSET] at ~$XXX.XX ([QTY] shares ≈ $X,XXX.XX)
   Action: This buy will be attempted automatically on the next simulation run.
-[If no sells were executed: omit this section]
+[If no sells: "No deferred buys — all intended trades executed this run."]
 
 📊 PERFORMANCE LOG ENTRY
 ━━━━━━━━━━━━━━━━━━━━
-[Date] | [Time ET] | [Starting Value] | [Ending Value] | [Net Gain $] | [Net Gain %] | [# Trades] | [Fees] | [Opening Cash] | [Cash Deferred] | [Market Status]
+[DATE], [TIME ET], $[START], $[END], [NET$], [NET%], [#TRADES], $[FEES], $[OPEN_CASH], $[SELL_CASH], [MARKET_STATUS], [NOTES]
 
-📁 CSV DATA BELOW
-━━━━━━━━━━━━━━━━━━━━
+--- AUTOMATED IMPORT SECTION ---
+⚠️ WARNING: The section below is parsed by an automated script.
+Do NOT alter the marker lines in any way. They must appear EXACTLY as shown,
+using only plain ASCII characters (=, space, letters). No Unicode, no decorations.
 
 === HOLDINGS CSV ===
-[full CSV text]
+Asset,Class,Quantity,Avg Cost,Current Price,Current Value,Allocation %,Notes
+[one row per holding]
 === END HOLDINGS CSV ===
 
 === TRANSACTIONS CSV ===
-[full CSV text]
-=== END TRANSACTIONS CSV ===
-
-⚠️ Simulation only. No real trades executed.
-— Cheo Portfolio Simulator
+Timestamp,Action,Asset,Class,Quantity,Price,Value,Fee,Net Value,Rationale
+[one row per transaction, empty if no transactions]
+=== TRANSACTIONS CSV ===
 ```
 
 ---
 
-## Step 6 — Simulation Report
+## Step 6 — Generate HTML Simulation Report
 
-Produce an HTML report via `fs_write` with `artifact: true` including:
+Generate a polished, self-contained HTML report as a downloadable artifact using `fs.write`
+with `artifact: true`.
 
-1. **Market Status Banner** — prominently show if markets are open/closed and what that
-   means for this run
-2. **News Highlights** — top 3 news items that influenced decisions, with source citations
-   (approved sources only: CNN, Reuters, Yahoo Finance, MarketWatch, CNBC)
-3. **Portfolio Snapshot (Before)** — all positions with live intraday prices + timestamps
-4. **Simulated Trades** — with fee impact and news rationale for each
-5. **Portfolio Snapshot (After)** — updated positions and allocations
-6. **Fee Summary** — total simulated fees, net gain after fees
-7. **Cash Settlement Note** — clearly show Opening Cash used for buys, Cash from Sells
-   deferred to next run, and Next Run Readiness summary
-8. **Performance Log Entry** — show the row that was (or should be) appended to the
-   Performance Log tab
-9. **Projection** — bear/base/bull 12-month scenarios
-10. **Download buttons** — Holdings CSV and Transactions CSV
-11. **Disclaimer** — simulation only, not financial advice
+### Report Sections
+
+1. **Header** — Title, run timestamp, market status badge (green OPEN / red CLOSED)
+2. **Portfolio Snapshot** — Table of all holdings with live prices, current value,
+   allocation %, and gain/loss vs avg cost
+3. **Trade Log** — Table of all simulated trades this run (or "No trades — market closed"
+   for equity/fixed income)
+4. **Next Run Readiness** — If sells were executed, show what buys are queued for next run
+5. **News Signals** — Bulleted list of key signals with source and sentiment label
+6. **Allocation Chart** — Text-based bar chart showing current vs target allocation by class
+7. **Performance Log Entry** — The exact row to be appended to the Performance Log tab,
+   formatted as a copyable one-liner
+8. **Methodology Notes** — Fee assumptions, data sources, simulation rules summary
 
 ---
 
 ## Edge Cases & Guardrails
 
-- **Markets closed, no crypto held:** Still produce a report. Show current valuations,
-  note market status, and recommend what to watch for when markets open.
-- **Intraday price unavailable:** Use last known price, label as stale, flag in report.
-- **Same asset traded multiple times today:** Require 2× min threshold signal strength.
-- **Cash insufficient for desired buys:** Execute sells first (for future runs), buy only
-  what opening cash allows. Never simulate a buy without sufficient opening cash — sell
-  first if needed, then buy on the next run.
-- **Sheet unreadable:** Abort and notify the user with a clear error message.
-- **All news neutral:** Still run allocation rebalancing logic (Steps 3c–3e). Neutral news
-  is not a reason to skip the run.
-- **Self-refresh failed (Step -1):** Log warning, continue with cached instructions.
-  Never abort due to a failed SKILL.md fetch.
+- **No cash available:** If Run Opening Cash Balance = $0 and no sells are triggered,
+  produce a report with no buy trades and note "Insufficient cash for buys this run."
+- **All assets held, no new candidates:** Skip Step 3a candidate discovery, just update
+  existing holdings.
+- **Price fetch fails:** Use last known price from sheet, label as stale, do not trade
+  that asset.
+- **Sheet unreadable:** Abort and report the error clearly. Do not fabricate holdings.
+- **Email send fails:** Produce artifact downloads and note the email failure in chat.
+- **No news found:** Proceed with allocation-only rebalancing. Note "No news signals
+  found — allocation-based trades only."
