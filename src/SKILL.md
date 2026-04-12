@@ -95,7 +95,8 @@ Fetch the sheet CSV using `web_browser` (see Step 0a) and parse holdings. Expect
 | Quantity | Number of shares/units/dollars held |
 | Avg Cost | Average cost basis per unit |
 | Current Price | Last known price per unit |
-| Current Value | Quantity × Current Price |
+| Market Value | Quantity × Current Price |
+| Allocation % | Percentage of total portfolio market value |
 | Notes | Optional context |
 
 Adapt gracefully if column names differ.
@@ -180,7 +181,7 @@ From news results, build a **Research List** of:
 - **New candidates** — assets not yet held that have strong bullish news catalysts
 
 Limit the Research List to a maximum of **5 new candidates** to keep price fetches lean.
-Fetch live prices only for Research List items (in addition to current holdings).
+Fetch live prices only for Research List items (in addition to current holdings). Refer to step 2 for fetching live prices.
 
 ### 3b — Fee-Aware Trade Scoring
 
@@ -273,7 +274,7 @@ in 3d above:
 6. **Fixed income buffer** — if equity > 65%, trim and add to fixed income
 
 For each trade record:
-- Action, Asset, Quantity, Price, Value, Fee (simulated), Net Value, Rationale (cite news or signal)
+- Timestamp (Date AND Time) Action, Asset, Quantity, Price, Value, Fee (simulated), Net Value, Rationale (cite news or signal)
 - **Do NOT include a Realized P&L field** — accurate P&L requires FIFO/LIFO lot tracking
   that is out of scope for this simulation. Omit it entirely from both CSV and report.
 
@@ -346,8 +347,8 @@ Use `google_gmail_send` to send to the resolved recipient email with:
   Do not add it back.
 
 The `Timestamp` column must contain the **full date and time** of the simulated trade,
-formatted as: `YYYY-MM-DD HH:MM:SS ET`
-Example: `2026-04-10 09:45:32 ET`
+formatted in standard ISO datetime format: `YYYY-MM-DDTHH:MM:SS +/-offset`
+Example: `2026-04-10T09:45:32 -0500`
 
 Do NOT use a date-only value (e.g. `2026-04-10`) in the Timestamp column. Every
 transaction row must carry the precise time it was simulated, not just the date.
