@@ -67,41 +67,52 @@ Use `http_request` with method GET and the URL above.
 
 ### 0a — Parse the Sheet Reference & Fetch the Ledger
 
+⚠️ **CRITICAL — The Google Sheets API is NOT available. Do NOT attempt any Sheets API calls,
+do NOT use `http_request` to call any `sheets.googleapis.com` endpoint, and do NOT attempt
+OAuth-based Sheets access under any circumstances. The only permitted method to read the
+spreadsheet is `web_browser` as described below.**
+
 Resolve the **Spreadsheet ID** from the required input:
 
 - URL pattern: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit...`
 - Raw ID input: `{SPREADSHEET_ID}`
 
-The CSV export URL is:
+The CSV export URL pattern for each tab is:
 
 ```
-https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid=0
+https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={GID}
 ```
 
-**Fetch strategy — attempt in this exact order, move to the next only on failure:**
+Common GIDs:
 
-**Attempt 1 — `http_request` with retries:**
-Use `http_request` with `maxRetries: 5` and `timeoutMs: 15000` against the CSV export URL.
-This works when Google's redirect chain resolves cleanly. If it returns HTTP 200 with CSV
-content, use it and skip Attempt 2.
+- Holdings tab: `gid=0` (default first sheet)
+- Transactions tab: check the sheet's tab order; use `gid=` from the tab's URL
+- Performance Log tab: check the sheet's tab order
 
-**Attempt 2 — `web_browser` fallback:**
-If Attempt 1 fails (network error, redirect loop, empty body, non-200 after retries), use
-`web_browser` to navigate to the CSV export URL, then use `extractText` to capture the
-content. The browser handles Google's multi-hop redirect and session flow natively.
+**Fetch strategy — use `web_browser` exclusively:**
 
-**On both attempts failing:**
-Do NOT conclude this is an auth problem unless the HTTP response explicitly contains
-"401 Unauthorized" or "403 Forbidden". Report the exact error received from both attempts
-in the simulation report and halt with a clear message asking the user to verify the sheet
-is shared as "Anyone with the link — Viewer". Do NOT proceed with the simulation based on
-stale data.
+Use `web_browser` to navigate to the CSV export URL for each tab, then use `extractText`
+to capture the content. The browser handles Google's multi-hop redirect and session flow
+natively.
+
+Example steps:
+
+```
+navigate → https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid=0
+extractText → body
+```
+
+**On failure:**
+If `web_browser` returns an empty body or an error page, report the exact content received
+and halt with a clear message asking the user to verify the sheet is shared as
+"Anyone with the link — Viewer". Do NOT proceed with the simulation based on stale or
+missing data.
 
 **Do NOT:**
 
-- Skip Attempt 1 and go straight to `web_browser` — always try `http_request` first
-- Conclude "auth problem" or "Sheets API required" based on redirect or timeout errors alone
-- Give up after a single failure — both attempts must be exhausted before halting
+- Attempt to use the Sheets API or any `sheets.googleapis.com` endpoint — it is not available
+- Conclude "auth problem" or "API required" based on redirect or timeout errors alone
+- Use hardcoded or previously cached spreadsheet data — always fetch fresh on each run
 
 ### 0b — Determine Market Status (CRITICAL — Check This First)
 
@@ -352,7 +363,7 @@ or report until this check passes.
 
 **Trade sequencing within a single run:**
 Record all SELLs first in the Transactions CSV, then all BUYs — even though sell proceeds
-don't fund this run's buys, the ordering makes the ledger easier to audit.
+don't feed this run's buys, the ordering makes the ledger easier to audit.
 
 ### 3e — Trade Logic (Markets Open for Equity/Fixed Income, Always for Crypto)
 
@@ -380,7 +391,7 @@ For each trade record:
 
 ## Step 4 — Update the Spreadsheet
 
-### Approach A — Via CSV Email + Apps Script (primary fallback)
+### Approach A — Via CSV Email + Apps Script (primary)
 
 Generate CSVs and email them. The user's Apps Script auto-imports within 5 minutes.
 
@@ -403,160 +414,175 @@ This builds a track record over time so the user can evaluate simulation accurac
 
 ### How to append the Performance Log row:
 
-**If Google Sheets API (OAuth) is available:**
-Use `http_request` to append the row via the Sheets API:
-
-```
-POST https://sheets.googleapis.com/v4/spreadsheets/{SPREADSHEET_ID}/values/Performance Log!A:M:append?valueInputOption=USER_ENTERED
-```
-
-**If Sheets API is not available (fallback):**
+⚠️ **The Google Sheets API is NOT available.** Do not attempt any Sheets API calls.
 
 - Include the Performance Log row clearly in the simulation report HTML under a
   "Performance Log Entry" section, formatted as a copyable table row.
 - Include it in the email body under the summary section so the user can paste it manually
   if needed.
-- Note: "Auto-append to Performance Log tab requires Sheets API access. Row provided above
-  for manual entry."
 
 ---
 
-## Step 5 — Email the CSVs (ALWAYS DO THIS)
+## Step 5 — Email the CSVs (ALWAYS DO THIS — PARSER CONTRACT)
 
 **Resolve the recipient email at runtime.** Use the email address associated with the
-user's connected Google account. Do NOT use any hardcoded email address — always derive
-the recipient from the authenticated Google integration so this skill works correctly for
-any user who runs it.
+user's connected Google account. Do NOT use any hardcoded email address.
 
-Use `google_gmail_send` to send to the resolved recipient email with:
+Use `google_gmail_send` to send the email.
 
-⚠️ **CRITICAL - DO NOT INCLUDE ANY HTML IN THE EMAIL BODY.** The email body is parsed by
-an Apps Script and must be plain text.
-⚠️ **CRITICAL - DO NOT INCLUDE ANY HTML IN THE SUBJECT.** The subject is parsed by an Apps
-Script and must be plain text.
-⚠️ **CRITICAL - THE SUBJECT LINE MUST BE EXACTLY `Portfolio Simulation Results - [DATE] [TIME ET]`** The subject is
-parsed by an Apps Script and must match the exact string format.
+---
 
-- **Subject:** `Portfolio Simulation Results - [YYYY-MM-DD HH:MM ET]`
-  *(Include time since this runs intraday — multiple emails per day is expected)*
-- **Body:** Full summary + inline CSV blocks (see template below)
+### ⚠️ EMAIL FORMAT SPECIFICATION — THIS IS A MACHINE PARSER CONTRACT, NOT A TEMPLATE
+
+The email subject and body are consumed by an Apps Script that uses exact string matching
+to locate section markers, parse CSV blocks, and route data into the correct spreadsheet
+tabs. **Any deviation — a wrong character, an extra space, a different dash, HTML tags,
+emoji, a reworded marker — causes the Apps Script to silently fail and discard the email.**
+
+Treat every character in the subject line and every marker in the body as a machine
+instruction. Do not paraphrase, summarize, reformat, add helpfulness, or deviate in any way.
+
+---
+
+### Subject Line — Exact Format
+
+```
+Portfolio Simulation Results — YYYY-MM-DD HH:MM ET
+```
+
+**The separator between "Results" and the date is an em dash (—), NOT a hyphen (-) or en dash (–).**
+
+| ✅ Valid   | `Portfolio Simulation Results — 2026-04-15 14:30 ET`                       |
+|-----------|----------------------------------------------------------------------------|
+| ❌ Invalid | `Portfolio Simulation Results - 2026-04-15 14:30 ET` ← hyphen              |
+| ❌ Invalid | `Portfolio Simulation Results – 2026-04-15 14:30 ET` ← en dash             |
+| ❌ Invalid | `Portfolio Simulation Results — 04/15/2026 2:30 PM ET` ← wrong date format |
+| ❌ Invalid | `Re: Portfolio Simulation Results — 2026-04-15 14:30 ET` ← prefix          |
+| ❌ Invalid | `📊 Portfolio Simulation Results — 2026-04-15 14:30 ET` ← emoji prefix     |
+
+Use 24-hour time (HH:MM). Use the verified ET time from Step 0b.
+
+**Do NOT include any HTML in the subject line.** Plain text only.
+
+---
+
+### Body Format — Exact Structure
+
+**Do NOT include any HTML in the email body.** The body must be plain text only.
+HTML tags, bold markers, bullet symbols, or any markup will break the Apps Script parser.
+
+The body must follow this exact structure, in this exact order, with these exact markers:
+
+```
+SUMMARY
+[Free-text summary of the simulation run. Include: starting portfolio value, ending
+portfolio value, net gain/loss ($), net gain/loss (%), number of trades simulated,
+total simulated fees, market status (OPEN/CLOSED), opening cash balance, and a brief
+plain-English rationale for the trades taken. Also include the Performance Log row here
+as a plain-text line for manual reference.]
+
+HOLDINGS_CSV_START
+Asset,Class,Quantity,Avg Cost,Current Price,Market Value,Allocation %,Notes
+[one row per holding — no blank lines between rows]
+HOLDINGS_CSV_END
+
+TRANSACTIONS_CSV_START
+Date,Time ET,Action,Asset,Class,Quantity,Price,Value,Fee,Net Value,Rationale
+[one row per trade — SELLs first, then BUYs — no blank lines between rows]
+[If no trades were simulated, include the header row only — do NOT omit this block]
+TRANSACTIONS_CSV_END
+```
+
+**Marker rules — each marker must appear on its own line, exactly as written:**
+
+| Marker                         | Rule                                                                      |
+|--------------------------------|---------------------------------------------------------------------------|
+| `SUMMARY`                      | Standalone line. No colon, no prefix, no suffix.                          |
+| `=== HOLDINGS CSV ===`         | Standalone line immediately before the header row.                        |
+| `=== END HOLDINGS CSV ===`     | Standalone line immediately after the last data row.                      |
+| `=== TRANSACTIONS CSV ===`     | Standalone line immediately before the header row.                        |
+| `=== END TRANSACTIONS CSV ===` | Standalone line immediately after the last data row (or header-only row). |
+
+**Do NOT:**
+
+- Add blank lines between a marker and its header row, or between its last data row and the closing marker
+- Add any text, labels, or commentary inside the CSV blocks
+- Wrap CSV content in code fences (``` or ~~~)
+- Use any markdown formatting anywhere in the body
+- Add a preamble, greeting, or sign-off before `SUMMARY` or after `=== END TRANSACTIONS CSV ===`
+
+---
 
 ### CSV Format Requirements
 
-**Holdings CSV columns:**
-`Asset, Class, Quantity, Avg Cost, Current Price, Current Value, Allocation %, Notes`
+**Holdings CSV columns (exact header, exact order):**
+`Asset,Class,Quantity,Avg Cost,Current Price,Market Value,Allocation %,Notes`
 
-**Transactions CSV columns:**
-`Timestamp, Action, Asset, Class, Quantity, Price, Value, Fee, Net Value, Rationale`
+**Transactions CSV columns (exact header, exact order):**
+`Timestamp,Action,Asset,Class,Quantity,Price,Value,Fee,Net Value,Rationale`
 
-- **Do NOT include a Realized P&L column** in the Transactions CSV. It is intentionally
-  omitted because accurate P&L requires FIFO/LIFO lot accounting that is out of scope.
-  Do not add it back.
+**Formatting rules:**
 
-The `Timestamp` column must contain the **full date and time** of the simulated trade,
-formatted in standard ISO datetime format: `YYYY-MM-DDTHH:MM:SS +/-offset`
-Example: `2026-04-10T09:45:32 -0500`
+- Dollar amounts: 2 decimal places, no `$` sign (e.g. `5148.22`, not `$5,148.22`)
+- Percentages: 2 decimal places, no `%` sign (e.g. `12.50`, not `12.5%`)
+- Crypto quantities: 4 decimal places (e.g. `0.0312`)
+- Equity/ETF quantities: 2 decimal places (e.g. `10.00`)
+- Dates: `YYYY-MM-DD`
+- Times: `HH:MM` in 24-hour ET
+- Timestamps: `YYYY-MM-DDTHH:MM +/-HHMM` in ISO data + 24-hour ET
+- No BOM, no trailing commas, no extra whitespace, no thousands separators
+- No blank lines within a CSV block
 
-Do NOT use a date-only value (e.g. `2026-04-10`) in the Timestamp column. Every
-transaction row must carry the precise time it was simulated, not just the date.
+**Sign convention (CRITICAL — must match exactly):**
 
-**Net Value sign convention in CSV:**
-
-- BUY rows: Net Value must be **negative** (e.g. `-124.96`)
-- SELL rows: Net Value must be **positive** (e.g. `+843.20`)
-
-### Email Body Template
-
-⚠️ **CRITICAL — CSV BLOCK MARKERS MUST BE FOLLOWED EXACTLY, CHARACTER FOR CHARACTER.**
-The markers below are parsed by an automated Apps Script. Any deviation — including
-decorative Unicode characters (━, ═, etc.), extra spaces, different capitalization, or
-changed punctuation — will break the import script. Copy them verbatim. No exceptions.
-
-```
-Hi [user's preferred name],
-
-Your portfolio simulation for [DATE] at [TIME ET] is complete.
-
-📊 SIMULATION SUMMARY
-━━━━━━━━━━━━━━━━━━━━
-Market Status:   [OPEN / CLOSED — equity/fixed income trades active/paused]
-Starting Value:  $X,XXX.XX
-Ending Value:    $X,XXX.XX
-Simulated Gain:  +$XXX.XX (+X.X%)
-Simulated Fees:  -$X.XX
-Opening Cash:    $X,XXX.XX  ← cash available for buys this run
-Cash from Sells: $X,XXX.XX  ← deferred; available next run
-
-📰 KEY NEWS SIGNALS
-━━━━━━━━━━━━━━━━━━━━
-[2-3 bullet points of top news items that drove trade decisions, with source attribution]
-
-📋 TRADES EXECUTED
-━━━━━━━━━━━━━━━━━━━━
-[List each trade: BUY/SELL | TICKER | QTY | PRICE | VALUE | FEE | REASON]
-[If no equity trades: "Equity/fixed income trades paused — market closed"]
-[If sells were made but buys were limited: note how much cash is deferred to next run]
-
-🔄 NEXT RUN READINESS
-━━━━━━━━━━━━━━━━━━━━
-[If sells were executed this run, clearly state:]
-  Sold [ASSET] for $X,XXX.XX → cash now available next run
-  Intended buy: [ASSET] at ~$XXX.XX ([QTY] shares ≈ $X,XXX.XX)
-  Action: This buy will be attempted automatically on the next simulation run.
-[If no sells: "No deferred buys — all intended trades executed this run."]
-
-📊 PERFORMANCE LOG ENTRY
-━━━━━━━━━━━━━━━━━━━━
-[DATE], [TIME ET], $[START], $[END], [NET$], [NET%], [#TRADES], $[FEES], $[OPEN_CASH], $[SELL_CASH], [MARKET_STATUS], [NOTES]
-
---- AUTOMATED IMPORT SECTION ---
-⚠️ WARNING: The section below is parsed by an automated script.
-Do NOT alter the marker lines in any way. They must appear EXACTLY as shown,
-using only plain ASCII characters (=, space, letters). No Unicode, no decorations.
-
-=== HOLDINGS CSV ===
-Asset,Class,Quantity,Avg Cost,Current Price,Current Value,Allocation %,Notes
-[one row per holding]
-=== END HOLDINGS CSV ===
-
-=== TRANSACTIONS CSV ===
-Timestamp,Action,Asset,Class,Quantity,Price,Value,Fee,Net Value,Rationale
-[one row per transaction, empty if no transactions]
-=== TRANSACTIONS CSV ===
-```
+- BUY `Net Value`: negative number (e.g. `-523.45`) — cash outflow
+- SELL `Net Value`: positive number (e.g. `1204.80`) — cash inflow
 
 ---
 
-## Step 6 — Generate HTML Simulation Report
+### Pre-Send Checklist (MANDATORY — verify every item before calling `google_gmail_send`)
 
-Generate a polished, self-contained HTML report as a downloadable artifact using `fs.write`
-with `artifact: true`.
+Before sending the email, confirm ALL of the following:
 
-### Report Sections
+- [ ] Subject uses em dash (—), not hyphen or en dash
+- [ ] Date in subject is `YYYY-MM-DD` format
+- [ ] Time in subject is 24-hour `HH:MM ET` format
+- [ ] Subject has no HTML, emoji, or prefix
+- [ ] Body is plain text — zero HTML tags anywhere
+- [ ] `SUMMARY` marker is on its own line with no trailing characters
+- [ ] `HOLDINGS_CSV_START` and `HOLDINGS_CSV_END` are present, each on their own line
+- [ ] `TRANSACTIONS_CSV_START` and `TRANSACTIONS_CSV_END` are present, each on their own line
+- [ ] No blank lines between markers and their adjacent CSV rows
+- [ ] Holdings CSV uses exact column header:
+  `Asset,Class,Quantity,Avg Cost,Current Price,Market Value,Allocation %,Notes`
+- [ ] Transactions CSV uses exact column header:
+  `Date,Time ET,Action,Asset,Class,Quantity,Price,Value,Fee,Net Value,Rationale`
+- [ ] BUY Net Values are negative; SELL Net Values are positive
+- [ ] Total BUY outflow does not exceed Run Opening Cash Balance
+- [ ] No markdown, code fences, or extra commentary inside CSV blocks
+- [ ] No preamble before `SUMMARY`, no sign-off after `TRANSACTIONS_CSV_END`
 
-1. **Header** — Title, run timestamp, market status badge (green OPEN / red CLOSED)
-2. **Portfolio Snapshot** — Table of all holdings with live prices, current value,
-   allocation %, and gain/loss vs avg cost
-3. **Trade Log** — Table of all simulated trades this run (or "No trades — market closed"
-   for equity/fixed income)
-4. **Next Run Readiness** — If sells were executed, show what buys are queued for next run
-5. **News Signals** — Bulleted list of key signals with source and sentiment label
-6. **Allocation Chart** — Text-based bar chart showing current vs target allocation by class
-7. **Performance Log Entry** — The exact row to be appended to the Performance Log tab,
-   formatted as a copyable one-liner
-8. **Methodology Notes** — Fee assumptions, data sources, simulation rules summary
+If any item fails this checklist, fix it before sending. Do not send a non-conforming email.
+
+**On email send failure:**
+If `google_gmail_send` returns an error, attach the Holdings and Transactions CSVs as
+downloadable artifacts in the chat response so the user can manually import them.
+Never silently swallow an email failure.
 
 ---
 
-## Edge Cases & Guardrails
+## Step 6 — Simulation Report
 
-- **No cash available:** If Run Opening Cash Balance = $0 and no sells are triggered,
-  produce a report with no buy trades and note "Insufficient cash for buys this run."
-- **All assets held, no new candidates:** Skip Step 3a candidate discovery, just update
-  existing holdings.
-- **Price fetch fails:** Use last known price from sheet, label as stale, do not trade
-  that asset.
-- **Sheet unreadable:** Abort and report the error clearly. Do not fabricate holdings.
-- **Email send fails:** Produce artifact downloads and note the email failure in chat.
-- **No news found:** Proceed with allocation-only rebalancing. Note "No news signals
-  found — allocation-based trades only."
+After the email is sent (or after the artifact fallback), produce a clean HTML simulation
+report in the chat. The report should include:
+
+- Run timestamp and market status
+- Portfolio summary table (before and after)
+- Trade log with rationale
+- Allocation breakdown (before and after, by class)
+- News signals that drove decisions
+- Performance Log entry (copyable)
+- Any warnings or edge cases encountered during the run
+
+The HTML report is for human readability — it is separate from the plain-text email and
+is not parsed by any script. It may use formatting, tables, and color.
