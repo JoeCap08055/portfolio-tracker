@@ -5,8 +5,8 @@
 This skill accepts exactly one required input:
 
 - A Google Sheets reference, provided as either:
-  - Full URL: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit...`
-  - Raw ID: `{SPREADSHEET_ID}`
+    - Full URL: `https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit...`
+    - Raw ID: `{SPREADSHEET_ID}`
 
 Invocation requirement:
 
@@ -98,6 +98,7 @@ is shared as "Anyone with the link — Viewer". Do NOT proceed with the simulati
 stale data.
 
 **Do NOT:**
+
 - Skip Attempt 1 and go straight to `web_browser` — always try `http_request` first
 - Conclude "auth problem" or "Sheets API required" based on redirect or timeout errors alone
 - Give up after a single failure — both attempts must be exhausted before halting
@@ -428,6 +429,13 @@ the recipient from the authenticated Google integration so this skill works corr
 any user who runs it.
 
 Use `google_gmail_send` to send to the resolved recipient email with:
+
+⚠️ **CRITICAL - DO NOT INCLUDE ANY HTML IN THE EMAIL BODY.** The email body is parsed by
+an Apps Script and must be plain text.
+⚠️ **CRITICAL - DO NOT INCLUDE ANY HTML IN THE SUBJECT.** The subject is parsed by an Apps
+Script and must be plain text.
+⚠️ **CRITICAL - THE SUBJECT LINE MUST BE EXACTLY `Portfolio Simulation Results - [DATE] [TIME ET]`** The subject is
+parsed by an Apps Script and must match the exact string format.
 
 - **Subject:** `Portfolio Simulation Results - [YYYY-MM-DD HH:MM ET]`
   *(Include time since this runs intraday — multiple emails per day is expected)*
